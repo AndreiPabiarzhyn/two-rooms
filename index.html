@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
@@ -73,7 +73,7 @@ const T = {
   AR:{lang:'ar',dir:'rtl',open:'افتح الباب',exits:n=>'المخارج '+n+'/2',roads:'طريقان!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'رجوع'}
 };
 const LANGS = ['RU','EN','ES','ID','IT','TR','PL','PT','AR'];
-let lang = 'RU';
+let lang = 'EN';
 const ART_W = 1024, ART_H = 1536;
 const EXITS = [[165,225],[865,225]];
 const FORK = [512, 610];
@@ -87,6 +87,8 @@ const exitsEl = document.getElementById('exits');
 const crystalsEl = document.getElementById('crystals');
 const canvas = document.getElementById('cv');
 const ctx = canvas.getContext('2d');
+const mask = document.createElement('canvas');
+const mctx = mask.getContext('2d', { willReadFrequently: true });
 const sound = new Audio('door_magic.wav');
 const winSound = new Audio('signal_happy.mp3');
 const crystalSound = new Audio('signal_short.mp3');
@@ -94,8 +96,14 @@ const room = new Image();
 room.src = 'room_temple.jpg';
 const pik = new Image();
 pik.src = 'pik_charged.png';
+const burstCyan = new Image();
+burstCyan.src = 'burst_cyan.png';
+const burstGold = new Image();
+burstGold.src = 'burst_gold.png';
 
-let W = 0, H = 0, brush = 48, foundExits = [], foundCrystals = [], drawing = false, last = null, pikOn = false;
+let W = 0, H = 0, brush = 36, foundExits = [], foundCrystals = [], drawing = false, last = null;
+let pikOn = false, pikT = 0, bursts = [], loopOn = false, lastFrame = 0;
+const CRYSTAL_R = 0.05, EXIT_R = 0.08, NEED = 0.85;
 
 function setLang(code) {
   lang = code;
@@ -123,83 +131,149 @@ function layout() {
   const maxH = stage.clientHeight;
   let w = maxW, h = Math.round(w * ART_H / ART_W);
   if (h > maxH) { h = maxH; w = Math.round(h * ART_W / ART_H); }
-  const prev = ctx.getImageData ? null : null;
-  const snap = (W && H) ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = mask.width = w;
+  canvas.height = mask.height = h;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
   W = w; H = h;
   setBrush();
-  if (snap && snap.width === w && snap.height === h) ctx.putImageData(snap, 0, 0);
-  else fillDark();
-}
-function fillDark() {
-  if (!W) return;
-  ctx.fillStyle = '#05070c';
-  ctx.fillRect(0, 0, W, H);
-}
-function reveal() {
-  if (!room.complete || !room.naturalWidth) return;
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-over';
-  ctx.drawImage(room, 0, 0, W, H);
-  ctx.restore();
-}
-function scratch(x0, y0, x1, y1) {
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.strokeStyle = 'rgba(0,0,0,1)';
-  ctx.lineWidth = brush;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.beginPath();
-  ctx.moveTo(x0, y0);
-  ctx.lineTo(x1, y1);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x1, y1, brush / 2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-  reveal();
-  hit(x1, y1);
-  drawPik();
+  fillDark();
 }
 function setBrush() {
   const grown = 24 + (72 - 24) * (foundCrystals.length / CRYSTALS.length);
-  brush = Math.max(16, grown * W / ART_W) * 3;
+  brush = Math.max(14, grown * W / ART_W) * 2.2;
+}
+function fillDark() {
+  if (!W) return;
+  mctx.globalCompositeOperation = 'source-over';
+  mctx.fillStyle = '#05070c';
+  mctx.fillRect(0, 0, W, H);
+  render();
+}
+function scratch(x0, y0, x1, y1) {
+  mctx.save();
+  mctx.globalCompositeOperation = 'destination-out';
+  mctx.strokeStyle = 'rgba(0,0,0,1)';
+  mctx.fillStyle = 'rgba(0,0,0,1)';
+  mctx.lineWidth = brush;
+  mctx.lineCap = 'round';
+  mctx.lineJoin = 'round';
+  mctx.beginPath();
+  mctx.moveTo(x0, y0);
+  mctx.lineTo(x1, y1);
+  mctx.stroke();
+  mctx.beginPath();
+  mctx.arc(x1, y1, brush / 2, 0, Math.PI * 2);
+  mctx.fill();
+  mctx.restore();
+  checkArea();
+  ensureLoop();
 }
 function play(audio) {
   const n = audio.cloneNode();
   n.play().catch(function () {});
 }
+function easeOutBack(t) {
+  const c1 = 1.4;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
 function drawPik() {
-  if (!pikOn || !pik.complete || !pik.naturalWidth) return;
-  const size = Math.min(330, W * 0.92);
-  ctx.drawImage(pik, sx(FORK[0]) - size / 2, sy(FORK[1]) - size / 2, size, size);
+  if (!pikOn || pikT <= 0 || !pik.complete || !pik.naturalWidth) return;
+  const e = easeOutBack(Math.min(1, pikT));
+  const size = Math.min(300, W * 0.78) * Math.max(0.05, e);
+  const x = sx(FORK[0]), y = sy(FORK[1]);
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, pikT * 1.6);
+  ctx.shadowColor = 'rgba(0, 229, 255, 0.9)';
+  ctx.shadowBlur = 36 * Math.min(1, pikT);
+  ctx.drawImage(pik, x - size / 2, y - size / 2, size, size);
+  ctx.restore();
 }
-function near(list, found, x, y, pad) {
-  for (let i = 0; i < list.length; i++) {
-    if (found.indexOf(i) >= 0) continue;
-    const dx = sx(list[i][0]) - x, dy = sy(list[i][1]) - y;
-    if (dx * dx + dy * dy <= pad * pad) return i;
+function drawBursts() {
+  for (let i = 0; i < bursts.length; i++) {
+    const b = bursts[i];
+    const e = 1 - Math.pow(1 - Math.min(1, b.t), 3);
+    const img = b.kind === 'exit' ? burstGold : burstCyan;
+    const size = (b.kind === 'exit' ? 0.28 : 0.16) * W * (0.35 + e);
+    ctx.save();
+    ctx.globalAlpha = b.t < 0.65 ? e : Math.max(0, (1 - b.t) / 0.35);
+    if (img.complete && img.naturalWidth) ctx.drawImage(img, b.x - size / 2, b.y - size / 2, size, size);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, size * 0.45, 0, Math.PI * 2);
+    ctx.strokeStyle = b.kind === 'exit' ? 'rgba(255, 196, 64, ' + (1 - b.t) + ')' : 'rgba(0, 229, 255, ' + (1 - b.t) + ')';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.restore();
   }
-  return -1;
 }
-function hit(x, y) {
-  const c = near(CRYSTALS, foundCrystals, x, y, 0.03 * W + brush / 2);
-  if (c >= 0) {
-    foundCrystals.push(c);
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  if (room.complete && room.naturalWidth) ctx.drawImage(room, 0, 0, W, H);
+  else { ctx.fillStyle = '#05070c'; ctx.fillRect(0, 0, W, H); }
+  ctx.drawImage(mask, 0, 0);
+  drawBursts();
+  drawPik();
+}
+function openedShare(data, cx, cy, radius) {
+  let lit = 0, total = 0;
+  const steps = 4;
+  for (let a = -steps; a <= steps; a++) {
+    for (let b = -steps; b <= steps; b++) {
+      const dx = a / steps, dy = b / steps;
+      if (dx * dx + dy * dy > 1) continue;
+      total++;
+      const x = Math.max(0, Math.min(W - 1, Math.round(cx + dx * radius)));
+      const y = Math.max(0, Math.min(H - 1, Math.round(cy + dy * radius)));
+      if (data[(y * W + x) * 4 + 3] < 28) lit++;
+    }
+  }
+  return total ? lit / total : 0;
+}
+function checkArea() {
+  if (!W) return;
+  const data = mctx.getImageData(0, 0, W, H).data;
+  let changed = false;
+  for (let i = 0; i < CRYSTALS.length; i++) {
+    if (foundCrystals.indexOf(i) >= 0) continue;
+    const x = sx(CRYSTALS[i][0]), y = sy(CRYSTALS[i][1]);
+    if (openedShare(data, x, y, CRYSTAL_R * W) < NEED) continue;
+    foundCrystals.push(i);
+    bursts.push({ x: x, y: y, kind: 'crystal', t: 0 });
     setBrush();
     play(crystalSound);
+    changed = true;
   }
-  const e = near(EXITS, foundExits, x, y, 0.06 * W + brush / 2);
-  if (e >= 0) {
-    foundExits.push(e);
+  for (let i = 0; i < EXITS.length; i++) {
+    if (foundExits.indexOf(i) >= 0) continue;
+    const x = sx(EXITS[i][0]), y = sy(EXITS[i][1]);
+    if (openedShare(data, x, y, EXIT_R * W) < NEED) continue;
+    foundExits.push(i);
+    bursts.push({ x: x, y: y, kind: 'exit', t: 0 });
     play(winSound);
-    if (foundExits.length === 2) pikOn = true;
+    if (foundExits.length === 2) { pikOn = true; pikT = 0; }
+    changed = true;
   }
-  if (c >= 0 || e >= 0) paintHud();
+  if (changed) paintHud();
+}
+function ensureLoop() {
+  if (loopOn) return;
+  loopOn = true;
+  lastFrame = performance.now();
+  requestAnimationFrame(frame);
+}
+function frame(now) {
+  const dt = Math.min(40, now - lastFrame);
+  lastFrame = now;
+  if (pikOn && pikT < 1) pikT = Math.min(1, pikT + dt / 900);
+  for (let i = bursts.length - 1; i >= 0; i--) {
+    bursts[i].t += dt / 700;
+    if (bursts[i].t >= 1) bursts.splice(i, 1);
+  }
+  render();
+  const busy = drawing || bursts.length || (pikOn && pikT < 1);
+  if (busy) requestAnimationFrame(frame);
+  else loopOn = false;
 }
 function pos(ev) {
   const r = canvas.getBoundingClientRect();
@@ -233,9 +307,10 @@ function showMap() {
   foundExits = [];
   foundCrystals = [];
   pikOn = false;
+  pikT = 0;
+  bursts = [];
   paintHud();
   layout();
-  fillDark();
 }
 openBtn.addEventListener('click', function () {
   sound.currentTime = 0;
@@ -247,8 +322,8 @@ backBtn.addEventListener('click', function () {
   door.classList.add('on');
 });
 window.addEventListener('resize', function () { if (map.classList.contains('on')) layout(); });
-room.onload = function () { if (map.classList.contains('on')) { fillDark(); } };
-setLang('RU');
+room.onload = function () { if (map.classList.contains('on')) render(); };
+setLang('EN');
 </script>
 </body>
 </html>
