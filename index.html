@@ -12,6 +12,13 @@ body{display:flex;flex-direction:column}
 .lang-bar{width:100%;background:rgba(13,27,42,.92);border-bottom:1px solid var(--border);padding:6px 8px;display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
 .lb{padding:2px 10px;border-radius:14px;border:1px solid var(--border);background:none;color:var(--muted);font:700 11px var(--font);cursor:pointer}
 .lb.on{background:var(--accent);border-color:var(--accent);color:#042028}
+.fit{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.phone{
+  height:100%;aspect-ratio:9/16;max-width:100%;
+  background:#111;border-radius:28px;padding:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.35);display:flex
+}
+.screen{flex:1;min-width:0;min-height:0;background:var(--bg);border-radius:18px;overflow:hidden;display:flex;flex-direction:column}
 #app{flex:1;min-height:0;display:flex;flex-direction:column}
 #door,#map{flex:1;min-height:0;display:none;flex-direction:column}
 #door.on,#map.on{display:flex}
@@ -33,6 +40,9 @@ canvas{display:block;border-radius:12px;touch-action:none;max-width:100%;max-hei
 </head>
 <body>
 <div class="lang-bar" id="langBar"></div>
+<div class="fit">
+<div class="phone">
+<div class="screen">
 <div id="app">
   <section id="door" class="on">
     <img src="door_scene.jpg" alt="">
@@ -47,22 +57,26 @@ canvas{display:block;border-radius:12px;touch-action:none;max-width:100%;max-hei
     </div>
   </section>
 </div>
+</div>
+</div>
+</div>
 <script>
 const T = {
-  RU:{lang:'ru',dir:'ltr',open:'Открой дверь',exits:n=>'Выходы '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Назад'},
-  EN:{lang:'en',dir:'ltr',open:'Open the door',exits:n=>'Exits '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Back'},
-  ES:{lang:'es',dir:'ltr',open:'Abre la puerta',exits:n=>'Salidas '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Atrás'},
-  ID:{lang:'id',dir:'ltr',open:'Buka pintunya',exits:n=>'Jalan '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Kembali'},
-  IT:{lang:'it',dir:'ltr',open:'Apri la porta',exits:n=>'Uscite '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Indietro'},
-  TR:{lang:'tr',dir:'ltr',open:'Kapıyı aç',exits:n=>'Çıkış '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Geri'},
-  PL:{lang:'pl',dir:'ltr',open:'Otwórz drzwi',exits:n=>'Wyjścia '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Wstecz'},
-  PT:{lang:'pt',dir:'ltr',open:'Abre a porta',exits:n=>'Saídas '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Voltar'},
-  AR:{lang:'ar',dir:'rtl',open:'افتح الباب',exits:n=>'المخارج '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'رجوع'}
+  RU:{lang:'ru',dir:'ltr',open:'Открой дверь',exits:n=>'Выходы '+n+'/2',roads:'Две дороги!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Назад'},
+  EN:{lang:'en',dir:'ltr',open:'Open the door',exits:n=>'Exits '+n+'/2',roads:'Two roads!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Back'},
+  ES:{lang:'es',dir:'ltr',open:'Abre la puerta',exits:n=>'Salidas '+n+'/2',roads:'¡Dos caminos!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Atrás'},
+  ID:{lang:'id',dir:'ltr',open:'Buka pintunya',exits:n=>'Jalan '+n+'/2',roads:'Dua jalan!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Kembali'},
+  IT:{lang:'it',dir:'ltr',open:'Apri la porta',exits:n=>'Uscite '+n+'/2',roads:'Due strade!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Indietro'},
+  TR:{lang:'tr',dir:'ltr',open:'Kapıyı aç',exits:n=>'Çıkış '+n+'/2',roads:'İki yol!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Geri'},
+  PL:{lang:'pl',dir:'ltr',open:'Otwórz drzwi',exits:n=>'Wyjścia '+n+'/2',roads:'Dwie drogi!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Wstecz'},
+  PT:{lang:'pt',dir:'ltr',open:'Abre a porta',exits:n=>'Saídas '+n+'/2',roads:'Duas estradas!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Voltar'},
+  AR:{lang:'ar',dir:'rtl',open:'افتح الباب',exits:n=>'المخارج '+n+'/2',roads:'طريقان!',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'رجوع'}
 };
 const LANGS = ['RU','EN','ES','ID','IT','TR','PL','PT','AR'];
 let lang = 'RU';
 const ART_W = 1024, ART_H = 1536;
 const EXITS = [[165,225],[865,225]];
+const FORK = [512, 610];
 const CRYSTALS = [[160,445],[320,350],[350,170],[710,225],[720,370],[955,345],[380,575],[725,580],[465,795],[175,925],[178,1150],[765,1065],[460,1005],[265,715]];
 
 const door = document.getElementById('door');
@@ -74,10 +88,14 @@ const crystalsEl = document.getElementById('crystals');
 const canvas = document.getElementById('cv');
 const ctx = canvas.getContext('2d');
 const sound = new Audio('door_magic.wav');
+const winSound = new Audio('signal_happy.mp3');
+const crystalSound = new Audio('signal_short.mp3');
 const room = new Image();
 room.src = 'room_temple.jpg';
+const pik = new Image();
+pik.src = 'pik_charged.png';
 
-let W = 0, H = 0, brush = 18, foundExits = [], foundCrystals = [], drawing = false, last = null;
+let W = 0, H = 0, brush = 48, foundExits = [], foundCrystals = [], drawing = false, last = null, pikOn = false;
 
 function setLang(code) {
   lang = code;
@@ -93,7 +111,7 @@ function setLang(code) {
 }
 function paintHud() {
   const t = T[lang];
-  exitsEl.textContent = t.exits(foundExits.length);
+  exitsEl.textContent = foundExits.length === 2 ? t.roads : t.exits(foundExits.length);
   crystalsEl.textContent = t.crystals(foundCrystals.length, CRYSTALS.length);
 }
 function sx(x) { return x / ART_W * W; }
@@ -112,7 +130,7 @@ function layout() {
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
   W = w; H = h;
-  brush = Math.max(16, 24 * W / ART_W);
+  setBrush();
   if (snap && snap.width === w && snap.height === h) ctx.putImageData(snap, 0, 0);
   else fillDark();
 }
@@ -145,6 +163,20 @@ function scratch(x0, y0, x1, y1) {
   ctx.restore();
   reveal();
   hit(x1, y1);
+  drawPik();
+}
+function setBrush() {
+  const grown = 24 + (72 - 24) * (foundCrystals.length / CRYSTALS.length);
+  brush = Math.max(16, grown * W / ART_W) * 3;
+}
+function play(audio) {
+  const n = audio.cloneNode();
+  n.play().catch(function () {});
+}
+function drawPik() {
+  if (!pikOn || !pik.complete || !pik.naturalWidth) return;
+  const size = Math.min(330, W * 0.92);
+  ctx.drawImage(pik, sx(FORK[0]) - size / 2, sy(FORK[1]) - size / 2, size, size);
 }
 function near(list, found, x, y, pad) {
   for (let i = 0; i < list.length; i++) {
@@ -155,15 +187,18 @@ function near(list, found, x, y, pad) {
   return -1;
 }
 function hit(x, y) {
-  const pad = brush * 0.7 + 14;
-  const c = near(CRYSTALS, foundCrystals, x, y, pad);
+  const c = near(CRYSTALS, foundCrystals, x, y, 0.03 * W + brush / 2);
   if (c >= 0) {
     foundCrystals.push(c);
-    const grown = 24 + (72 - 24) * (foundCrystals.length / CRYSTALS.length);
-    brush = Math.max(16, grown * W / ART_W);
+    setBrush();
+    play(crystalSound);
   }
-  const e = near(EXITS, foundExits, x, y, pad + 8);
-  if (e >= 0) foundExits.push(e);
+  const e = near(EXITS, foundExits, x, y, 0.06 * W + brush / 2);
+  if (e >= 0) {
+    foundExits.push(e);
+    play(winSound);
+    if (foundExits.length === 2) pikOn = true;
+  }
   if (c >= 0 || e >= 0) paintHud();
 }
 function pos(ev) {
@@ -197,6 +232,7 @@ function showMap() {
   map.classList.add('on');
   foundExits = [];
   foundCrystals = [];
+  pikOn = false;
   paintHud();
   layout();
   fillDark();
