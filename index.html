@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>TwoRooms</title>
+<style>
+:root{--font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;--bg:#0D1B2A;--accent:#00E5FF;--border:rgba(255,255,255,.12);--muted:rgba(255,255,255,.55)}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--font);color:#fff;touch-action:none}
+body{display:flex;flex-direction:column}
+.lang-bar{width:100%;background:rgba(13,27,42,.92);border-bottom:1px solid var(--border);padding:6px 8px;display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
+.lb{padding:2px 10px;border-radius:14px;border:1px solid var(--border);background:none;color:var(--muted);font:700 11px var(--font);cursor:pointer}
+.lb.on{background:var(--accent);border-color:var(--accent);color:#042028}
+#app{flex:1;min-height:0;display:flex;flex-direction:column}
+#door,#map{flex:1;min-height:0;display:none;flex-direction:column}
+#door.on,#map.on{display:flex}
+#door img{flex:1;min-height:0;width:100%;object-fit:cover;object-position:center}
+#open{
+  margin:10px 12px 12px;padding:14px 12px;border:0;border-radius:16px;
+  background:var(--accent);color:#042028;font:700 20px var(--font);cursor:pointer
+}
+#open:active{transform:scale(.98)}
+#stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px 8px 0}
+canvas{display:block;border-radius:12px;touch-action:none;max-width:100%;max-height:100%;cursor:crosshair}
+.hud{display:flex;align-items:center;gap:8px;padding:8px 12px 12px;font-weight:700}
+.hud span{flex:1}
+#back{
+  border:0;border-radius:14px;padding:8px 14px;background:#16324a;color:#fff;
+  font:700 14px var(--font);cursor:pointer
+}
+</style>
+</head>
+<body>
+<div class="lang-bar" id="langBar"></div>
+<div id="app">
+  <section id="door" class="on">
+    <img src="door_scene.jpg" alt="">
+    <button id="open" type="button"></button>
+  </section>
+  <section id="map">
+    <div id="stage"><canvas id="cv"></canvas></div>
+    <div class="hud">
+      <span id="exits"></span>
+      <span id="crystals"></span>
+      <button id="back" type="button"></button>
+    </div>
+  </section>
+</div>
+<script>
+const T = {
+  RU:{lang:'ru',dir:'ltr',open:'Открой дверь',exits:n=>'Выходы '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Назад'},
+  EN:{lang:'en',dir:'ltr',open:'Open the door',exits:n=>'Exits '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Back'},
+  ES:{lang:'es',dir:'ltr',open:'Abre la puerta',exits:n=>'Salidas '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Atrás'},
+  ID:{lang:'id',dir:'ltr',open:'Buka pintunya',exits:n=>'Jalan '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Kembali'},
+  IT:{lang:'it',dir:'ltr',open:'Apri la porta',exits:n=>'Uscite '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Indietro'},
+  TR:{lang:'tr',dir:'ltr',open:'Kapıyı aç',exits:n=>'Çıkış '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Geri'},
+  PL:{lang:'pl',dir:'ltr',open:'Otwórz drzwi',exits:n=>'Wyjścia '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Wstecz'},
+  PT:{lang:'pt',dir:'ltr',open:'Abre a porta',exits:n=>'Saídas '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'Voltar'},
+  AR:{lang:'ar',dir:'rtl',open:'افتح الباب',exits:n=>'المخارج '+n+'/2',crystals:(n,t)=>'⚡ '+n+'/'+t,back:'رجوع'}
+};
+const LANGS = ['RU','EN','ES','ID','IT','TR','PL','PT','AR'];
+let lang = 'RU';
+const ART_W = 1024, ART_H = 1536;
+const EXITS = [[165,225],[865,225]];
+const CRYSTALS = [[160,445],[320,350],[350,170],[710,225],[720,370],[955,345],[380,575],[725,580],[465,795],[175,925],[178,1150],[765,1065],[460,1005],[265,715]];
+
+const door = document.getElementById('door');
+const map = document.getElementById('map');
+const openBtn = document.getElementById('open');
+const backBtn = document.getElementById('back');
+const exitsEl = document.getElementById('exits');
+const crystalsEl = document.getElementById('crystals');
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d');
+const sound = new Audio('door_magic.wav');
+const room = new Image();
+room.src = 'room_temple.jpg';
+
+let W = 0, H = 0, brush = 18, foundExits = [], foundCrystals = [], drawing = false, last = null;
+
+function setLang(code) {
+  lang = code;
+  const t = T[code];
+  document.documentElement.lang = t.lang;
+  document.documentElement.dir = t.dir;
+  openBtn.textContent = t.open;
+  backBtn.textContent = t.back;
+  paintHud();
+  document.getElementById('langBar').innerHTML = LANGS.map(function (l) {
+    return '<button class="lb' + (l === lang ? ' on' : '') + '" type="button" onclick="setLang(\'' + l + '\')">' + l + '</button>';
+  }).join('');
+}
+function paintHud() {
+  const t = T[lang];
+  exitsEl.textContent = t.exits(foundExits.length);
+  crystalsEl.textContent = t.crystals(foundCrystals.length, CRYSTALS.length);
+}
+function sx(x) { return x / ART_W * W; }
+function sy(y) { return y / ART_H * H; }
+
+function layout() {
+  const stage = document.getElementById('stage');
+  const maxW = stage.clientWidth;
+  const maxH = stage.clientHeight;
+  let w = maxW, h = Math.round(w * ART_H / ART_W);
+  if (h > maxH) { h = maxH; w = Math.round(h * ART_W / ART_H); }
+  const prev = ctx.getImageData ? null : null;
+  const snap = (W && H) ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
+  canvas.width = w;
+  canvas.height = h;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  W = w; H = h;
+  brush = Math.max(16, 24 * W / ART_W);
+  if (snap && snap.width === w && snap.height === h) ctx.putImageData(snap, 0, 0);
+  else fillDark();
+}
+function fillDark() {
+  if (!W) return;
+  ctx.fillStyle = '#05070c';
+  ctx.fillRect(0, 0, W, H);
+}
+function reveal() {
+  if (!room.complete || !room.naturalWidth) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-over';
+  ctx.drawImage(room, 0, 0, W, H);
+  ctx.restore();
+}
+function scratch(x0, y0, x1, y1) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.strokeStyle = 'rgba(0,0,0,1)';
+  ctx.lineWidth = brush;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x1, y1, brush / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  reveal();
+  hit(x1, y1);
+}
+function near(list, found, x, y, pad) {
+  for (let i = 0; i < list.length; i++) {
+    if (found.indexOf(i) >= 0) continue;
+    const dx = sx(list[i][0]) - x, dy = sy(list[i][1]) - y;
+    if (dx * dx + dy * dy <= pad * pad) return i;
+  }
+  return -1;
+}
+function hit(x, y) {
+  const pad = brush * 0.7 + 14;
+  const c = near(CRYSTALS, foundCrystals, x, y, pad);
+  if (c >= 0) {
+    foundCrystals.push(c);
+    const grown = 24 + (72 - 24) * (foundCrystals.length / CRYSTALS.length);
+    brush = Math.max(16, grown * W / ART_W);
+  }
+  const e = near(EXITS, foundExits, x, y, pad + 8);
+  if (e >= 0) foundExits.push(e);
+  if (c >= 0 || e >= 0) paintHud();
+}
+function pos(ev) {
+  const r = canvas.getBoundingClientRect();
+  const src = ev.touches ? ev.touches[0] : ev;
+  return { x: (src.clientX - r.left) * (canvas.width / r.width), y: (src.clientY - r.top) * (canvas.height / r.height) };
+}
+function down(ev) {
+  ev.preventDefault();
+  drawing = true;
+  last = pos(ev);
+  scratch(last.x, last.y, last.x, last.y);
+}
+function move(ev) {
+  if (!drawing) return;
+  ev.preventDefault();
+  const p = pos(ev);
+  scratch(last.x, last.y, p.x, p.y);
+  last = p;
+}
+function up() { drawing = false; last = null; }
+
+canvas.addEventListener('pointerdown', down);
+canvas.addEventListener('pointermove', move);
+window.addEventListener('pointerup', up);
+canvas.addEventListener('touchstart', down, {passive:false});
+canvas.addEventListener('touchmove', move, {passive:false});
+
+function showMap() {
+  door.classList.remove('on');
+  map.classList.add('on');
+  foundExits = [];
+  foundCrystals = [];
+  paintHud();
+  layout();
+  fillDark();
+}
+openBtn.addEventListener('click', function () {
+  sound.currentTime = 0;
+  sound.play().catch(function () {});
+  setTimeout(showMap, 1200);
+});
+backBtn.addEventListener('click', function () {
+  map.classList.remove('on');
+  door.classList.add('on');
+});
+window.addEventListener('resize', function () { if (map.classList.contains('on')) layout(); });
+room.onload = function () { if (map.classList.contains('on')) { fillDark(); } };
+setLang('RU');
+</script>
+</body>
+</html>
